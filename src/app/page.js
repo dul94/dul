@@ -331,3 +331,36 @@ export default function MaintenanceApp() {
     </div>
   );
 }
+
+const updateStatus = async (id, statusBaru) => {
+  const { error } = await supabase
+    .from(maintenance_reports) // Sesuaikan dengan nama tabel Anda di Supabase
+    .update({ status: statusBaru })
+    .eq('id', id);
+
+  if (error) {
+    alert('Gagal mengubah status: ' + error.message);
+  } else {
+    // Refresh data atau muat ulang daftar laporan
+    fetchLaporan(); 
+  }
+};
+
+<div className="flex gap-2 mt-3">
+  {laporan.status === 'Open' && (
+    <button 
+      onClick={() => updateStatus(laporan.id, 'In Progress')}
+      className="px-3 py-1 text-xs bg-yellow-500 text-white rounded hover:bg-yellow-600"
+    >
+      Proses (In Progress)
+    </button>
+  )}
+  {laporan.status !== 'Done' && (
+    <button 
+      onClick={() => updateStatus(laporan.id, 'Done')}
+      className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+    >
+      Selesai (Done)
+    </button>
+  )}
+</div>
