@@ -16,6 +16,7 @@ import {
   Sun,
   Moon,
   Plus,
+  Minus,
   LayoutDashboard,
   FileText,
   Menu,
@@ -26,7 +27,7 @@ import {
   Package,
   BellRing,
   Activity,
-  Layers,
+  Trash2,
 } from 'lucide-react';
 import {
   BarChart,
@@ -42,7 +43,6 @@ import {
 export default function CMMSProApp() {
   const router = useRouter();
 
-  // State Auth & Data Utama
   const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState('operator');
   const [reports, setReports] = useState([]);
@@ -52,14 +52,11 @@ export default function CMMSProApp() {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
-  // State Navigasi ('dashboard', 'reports', 'pm', 'assets', 'spareparts')
   const [activeMenu, setActiveMenu] = useState('dashboard');
-
-  // State Tema & Sidebar Mobile
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // State Form Laporan Kerusakan
+  // State Form Laporan
   const [selectedAssetId, setSelectedAssetId] = useState('');
   const [customAssetName, setCustomAssetName] = useState('');
   const [location, setLocation] = useState('');
@@ -97,9 +94,10 @@ export default function CMMSProApp() {
   const [pmSearchQuery, setPmSearchQuery] = useState('');
   const [partSearchQuery, setPartSearchQuery] = useState('');
 
-  // State UX (Toast, Modal Penyelesaian, Lightbox)
+  // State UX (Toast, Modal Penyelesaian, Konfirmasi Hapus Aset, Lightbox)
   const [toast, setToast] = useState(null);
   const [resolveModal, setResolveModal] = useState({ open: false, id: null, assetName: '' });
+  const [deleteAssetModal, setDeleteAssetModal] = useState({ open: false, id: null, name: '' });
   const [techNote, setTechNote] = useState('');
   const [lightboxUrl, setLightboxUrl] = useState(null);
 
@@ -239,37 +237,42 @@ export default function CMMSProApp() {
     }
   }
 
-  async function handleCreatePm(e) {
-    e.preventDefault();
-    if (!pmAssetId || !pmDueDate || !pmInterval) {
-      showToast('Lengkapi data jadwal PM.', 'error');
-      return;
-    }
-    const foundAsset = assetsList.find((a) => a.id === pmAssetId);
-    if (!foundAsset) return;
+  async function confirmDeleteAsset() {
+    if (!deleteAssetModal.id) return;
 
-    const { error } = await supabase.from('preventive_maintenance').insert([
-      {
-        asset_name: foundAsset.asset_name,
-        location: foundAsset.location,
-        interval_type: pmInterval,
-        next_due_date: pmDueDate,
-        assigned_to: pmAssigned.trim() || 'Tim Teknik',
-        description: pmDesc.trim() || 'Pemeliharaan rutin',
-        status: 'Scheduled',
-      },
-    ]);
+    const { error } = await supabase
+      .from('assets')
+      .delete()
+      .eq('id', deleteAssetModal.id);
 
     if (!error) {
-      showToast('Jadwal Preventive Maintenance dibuat!');
-      setPmAssetId('');
-      setPmDueDate('');
-      setPmAssigned('');
-      setPmDesc('');
-      setIsPmModalOpen(false);
-      fetchPmSchedules();
+      showToast(`Mesin "${deleteAssetModal.name}" berhasil dihapus.`);
+      setDeleteAssetModal({ open: false, id: null, name: '' });
+      fetchAssets();
     } else {
-      showToast('Gagal: ' + error.message, 'error');
+      showToast('Gagal menghapus mesin: ' + error.message, 'error');
+    }
+  }
+
+  // Fungsi Tambah / Kurang Stok Sparepart
+  async function updatePartStock(partId, currentStock, delta) {
+    if (userRole !== 'teknisi') {
+      showToast('Hanya teknisi yang dapat memperbarui stok sparepart!', 'error');
+      return;
+    }
+
+    const newStock = Math.max(0, currentStock + delta);
+
+    const { error } = await supabase
+      .from('spareparts')
+      .update({ stock: newStock })
+      .eq('id', partId);
+
+    if (!error) {
+      showToast(`Stok diperbarui menjadi ${newStock} Pcs`);
+      fetchSpareparts();
+    } else {
+      showToast('Gagal memperbarui stok: ' + error.message, 'error');
     }
   }
 
@@ -302,7 +305,6 @@ export default function CMMSProApp() {
     }
   }
 
-  // Statistik & Analitik Profesional
   const stats = useMemo(() => {
     const total = reports.length;
     const open = reports.filter((item) => item.status === 'Open').length;
@@ -553,7 +555,6 @@ export default function CMMSProApp() {
         </div>
       )}
 
-      {/* ALERT HIGH PRIORITY GLOBAL */}
       {stats.highPriority.length > 0 && activeMenu === 'dashboard' && (
         <div className="fixed top-0 inset-x-0 z-50 bg-rose-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 shadow-lg animate-pulse">
           <BellRing size={16} />
@@ -721,7 +722,6 @@ export default function CMMSProApp() {
 
         <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-14 space-y-6 flex-1">
           {activeMenu === 'dashboard' ? (
-            /* ================= VIEW 1: DASHBOARD EKSEKUTIF ================= */
             <div className="space-y-6">
               <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className={`p-5 rounded-2xl border relative overflow-hidden ${theme.card}`}>
@@ -807,7 +807,6 @@ export default function CMMSProApp() {
               </section>
             </div>
           ) : activeMenu === 'reports' ? (
-            /* ================= VIEW 2: LAPORAN & FORM ================= */
             <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className={`lg:col-span-4 p-6 rounded-2xl border lg:sticky lg:top-20 ${theme.card}`}>
                 <div className={`mb-5 pb-3.5 border-b flex justify-between items-center ${theme.divider}`}>
@@ -1067,7 +1066,6 @@ export default function CMMSProApp() {
               </div>
             </section>
           ) : activeMenu === 'pm' ? (
-            /* ================= VIEW 3: PREVENTIVE MAINTENANCE ================= */
             <div className="space-y-6">
               <div className={`p-5 rounded-2xl border flex flex-col sm:flex-row justify-between items-center gap-4 ${theme.card}`}>
                 <div className="relative flex-1 w-full sm:w-auto">
@@ -1140,7 +1138,7 @@ export default function CMMSProApp() {
               </div>
             </div>
           ) : activeMenu === 'spareparts' ? (
-            /* ================= VIEW 4: INVENTARIS SPAREPARTS ================= */
+            /* ================= VIEW 4: INVENTARIS SPAREPARTS DENGAN TOMBOL UPDATE STOK ================= */
             <div className="space-y-6">
               <div className={`p-5 rounded-2xl border flex flex-col sm:flex-row justify-between items-center gap-4 ${theme.card}`}>
                 <div className="relative flex-1 w-full sm:w-auto">
@@ -1158,7 +1156,7 @@ export default function CMMSProApp() {
                     onClick={() => setIsPartModalOpen(true)}
                     className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer shrink-0"
                   >
-                    <Plus size={15} /> Tambah Sparepart
+                    <Plus size={15} /> Tambah Sparepart Baru
                   </button>
                 )}
               </div>
@@ -1167,22 +1165,46 @@ export default function CMMSProApp() {
                 {partsTersaring.map((part) => {
                   const isLow = part.stock <= part.min_stock;
                   return (
-                    <div key={part.id} className={`p-5 rounded-2xl border space-y-3 ${theme.card} ${isLow ? 'border-l-4 border-l-rose-500' : ''}`}>
-                      <div className="flex items-start justify-between">
-                        <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-500">
-                          <Package size={20} />
+                    <div key={part.id} className={`p-5 rounded-2xl border space-y-3.5 flex flex-col justify-between ${theme.card} ${isLow ? 'border-l-4 border-l-rose-500' : ''}`}>
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-500">
+                            <Package size={20} />
+                          </div>
+                          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-md ${isLow ? 'bg-rose-500/15 text-rose-500' : 'bg-emerald-500/15 text-emerald-500'}`}>
+                            {isLow ? 'Stok Kritis' : 'Stok Aman'}
+                          </span>
                         </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isLow ? 'bg-rose-500/15 text-rose-500' : 'bg-emerald-500/15 text-emerald-500'}`}>
-                          {isLow ? 'Stok Kritis' : 'Stok Aman'}
-                        </span>
+                        <div>
+                          <h3 className={`font-bold text-base ${theme.title}`}>{part.part_name}</h3>
+                          <p className={`text-xs mt-0.5 font-mono ${theme.muted}`}>Kode: {part.part_code}</p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className={`font-bold text-base ${theme.title}`}>{part.part_name}</h3>
-                        <p className={`text-xs mt-0.5 font-mono ${theme.muted}`}>Kode: {part.part_code}</p>
-                      </div>
-                      <div className={`pt-2 border-t flex justify-between items-center text-xs ${theme.divider}`}>
-                        <span className={theme.muted}>Jumlah Stok:</span>
-                        <span className={`font-bold text-sm ${isLow ? 'text-rose-500' : ''}`}>{part.stock} Pcs</span>
+
+                      <div className={`pt-3 border-t flex items-center justify-between ${theme.divider}`}>
+                        <div>
+                          <span className={`text-[11px] block ${theme.muted}`}>Jumlah Stok:</span>
+                          <span className={`font-extrabold text-base ${isLow ? 'text-rose-500' : theme.title}`}>{part.stock} Pcs</span>
+                        </div>
+
+                        {userRole === 'teknisi' && (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => updatePartStock(part.id, part.stock, -1)}
+                              title="Kurangi 1 Stok"
+                              className="p-2 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition cursor-pointer"
+                            >
+                              <Minus size={14} />
+                            </button>
+                            <button
+                              onClick={() => updatePartStock(part.id, part.stock, 1)}
+                              title="Tambah 1 Stok"
+                              className="p-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition cursor-pointer"
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -1190,7 +1212,6 @@ export default function CMMSProApp() {
               </div>
             </div>
           ) : (
-            /* ================= VIEW 5: DAFTAR MESIN ================= */
             <div className="space-y-6">
               <div className={`p-5 rounded-2xl border flex flex-col sm:flex-row justify-between items-center gap-4 ${theme.card}`}>
                 <div className="relative flex-1 w-full sm:w-auto">
@@ -1215,22 +1236,34 @@ export default function CMMSProApp() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {assetsTersaring.map((asset) => (
-                  <div key={asset.id} className={`p-5 rounded-2xl border space-y-3 ${theme.card}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-500">
-                        <Server size={20} />
+                  <div key={asset.id} className={`p-5 rounded-2xl border space-y-3 flex flex-col justify-between ${theme.card}`}>
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between">
+                        <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-500">
+                          <Server size={20} />
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-500/10 text-slate-400">
+                          Aset Aktif
+                        </span>
                       </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-500/10 text-slate-400">
-                        Aset Aktif
+                      <div>
+                        <h3 className={`font-bold text-base ${theme.title}`}>{asset.asset_name}</h3>
+                        <p className={`text-xs mt-1 ${theme.muted}`}>Lokasi: <span className="font-medium">{asset.location}</span></p>
+                      </div>
+                    </div>
+
+                    <div className={`pt-3 border-t flex justify-between items-center text-[11px] ${theme.divider}`}>
+                      <span className={theme.muted}>
+                        Terdaftar: {new Date(asset.created_at).toLocaleDateString('id-ID')}
                       </span>
-                    </div>
-                    <div>
-                      <h3 className={`font-bold text-base ${theme.title}`}>{asset.asset_name}</h3>
-                      <p className={`text-xs mt-1 ${theme.muted}`}>Lokasi: <span className="font-medium">{asset.location}</span></p>
-                    </div>
-                    <div className={`pt-2 border-t text-[11px] flex justify-between ${theme.divider} ${theme.muted}`}>
-                      <span>Terdaftar:</span>
-                      <span>{new Date(asset.created_at).toLocaleDateString('id-ID')}</span>
+                      {userRole === 'teknisi' && (
+                        <button
+                          onClick={() => setDeleteAssetModal({ open: true, id: asset.id, name: asset.asset_name })}
+                          className="flex items-center gap-1 text-rose-500 hover:text-rose-600 font-semibold px-2 py-1 rounded-lg hover:bg-rose-500/10 transition cursor-pointer"
+                        >
+                          <Trash2 size={13} /> Hapus
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1265,6 +1298,40 @@ export default function CMMSProApp() {
                 <button type="submit" className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl cursor-pointer">Simpan Aset</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KONFIRMASI HAPUS MESIN */}
+      {deleteAssetModal.open && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className={`rounded-2xl max-w-sm w-full p-6 shadow-2xl border space-y-4 ${theme.card}`}>
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-rose-500/10 text-rose-500 shrink-0">
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h3 className={`text-base font-bold ${theme.title}`}>Hapus Mesin?</h3>
+                <p className={`text-xs mt-0.5 ${theme.muted}`}>Tindakan ini menghapus <strong className="text-rose-500">{deleteAssetModal.name}</strong> dari daftar master.</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteAssetModal({ open: false, id: null, name: '' })}
+                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:bg-slate-800 rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteAsset}
+                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl cursor-pointer shadow-sm"
+              >
+                Ya, Hapus Mesin
+              </button>
+            </div>
           </div>
         </div>
       )}
