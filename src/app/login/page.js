@@ -106,7 +106,7 @@ export default function LoginPage() {
         <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex items-center gap-3 relative z-10">
-          <div className="bg-gradient-to-br from-indigo-500 to-blue-600 p-2.5 rounded-xl shadow-lg">
+          <div className="bg-liniear-to-br from-indigo-500 to-blue-600 p-2.5 rounded-xl shadow-lg">
             <Wrench size={22} />
           </div>
           <span className="text-lg font-extrabold tracking-tight">MTC Control Center</span>
@@ -153,7 +153,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md space-y-6">
           {/* Header Mobile */}
           <div className="lg:hidden text-center space-y-2">
-            <div className="inline-flex items-center justify-center bg-gradient-to-br from-indigo-600 to-blue-600 p-3.5 rounded-2xl text-white shadow-md">
+            <div className="inline-flex items-center justify-center bg-liniear-to-br from-indigo-600 to-blue-600 p-3.5 rounded-2xl text-white shadow-md">
               <Wrench size={24} />
             </div>
             <h1 className="text-xl font-extrabold text-slate-900">MTC Control Center</h1>
