@@ -29,6 +29,7 @@ import {
   Activity,
   Trash2,
   Timer,
+  UserCheck,
 } from 'lucide-react';
 import {
   BarChart,
@@ -41,20 +42,16 @@ import {
   Cell,
 } from 'recharts';
 
-// Fungsi Pembantu Menghitung Durasi Perbaikan
-function formatRepairDuration(createdAt, resolvedAt, status) {
-  if (!createdAt) return '-';
-  const start = new Date(createdAt).getTime();
-  const end = status === 'Done' && resolvedAt ? new Date(resolvedAt).getTime() : Date.now();
-  const diffMs = Math.max(0, end - start);
-
-  const totalMinutes = Math.floor(diffMs / 60000);
+// Fungsi Pembantu Format Durasi Menit
+function formatManualDuration(totalMinutes) {
+  if (totalMinutes === null || totalMinutes === undefined || totalMinutes <= 0) return '-';
   const days = Math.floor(totalMinutes / 1440);
   const hours = Math.floor((totalMinutes % 1440) / 60);
   const minutes = totalMinutes % 60;
 
   if (days > 0) return `${days}h ${hours}j ${minutes}m`;
-  if (hours > 0) return `${hours}j ${minutes}m`;
+  if (hours > 0 && minutes > 0) return `${hours} jam ${minutes} menit`;
+  if (hours > 0) return `${hours} jam`;
   return `${minutes} menit`;
 }
 
@@ -112,11 +109,14 @@ export default function CMMSProApp() {
   const [pmSearchQuery, setPmSearchQuery] = useState('');
   const [partSearchQuery, setPartSearchQuery] = useState('');
 
-  // State UX (Toast, Modal Penyelesaian, Konfirmasi Hapus Aset, Lightbox)
+  // State UX (Toast, Modal Penyelesaian + Durasi & Nama Teknisi, Hapus Aset, Lightbox)
   const [toast, setToast] = useState(null);
   const [resolveModal, setResolveModal] = useState({ open: false, id: null, assetName: '' });
-  const [deleteAssetModal, setDeleteAssetModal] = useState({ open: false, id: null, name: '' });
+  const [techName, setTechName] = useState('');
+  const [repairHours, setRepairHours] = useState('');
+  const [repairMinutes, setRepairMinutes] = useState('');
   const [techNote, setTechNote] = useState('');
+  const [deleteAssetModal, setDeleteAssetModal] = useState({ open: false, id: null, name: '' });
   const [lightboxUrl, setLightboxUrl] = useState(null);
 
   const showToast = (message, type = 'success') => {
@@ -365,14 +365,11 @@ export default function CMMSProApp() {
     const highPriority = reports.filter((item) => item.priority === 'High' && item.status !== 'Done');
     const rate = total > 0 ? Math.round((done / total) * 100) : 0;
 
-    // Hitung Rata-Rata Durasi Perbaikan (MTTR)
     let avgRepairText = '-';
-    const validCompleted = doneReports.filter((r) => r.created_at && r.resolved_at);
+    const validCompleted = doneReports.filter((r) => r.durasi_menit && r.durasi_menit > 0);
     if (validCompleted.length > 0) {
-      const totalMs = validCompleted.reduce((acc, r) => {
-        return acc + Math.max(0, new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime());
-      }, 0);
-      const avgMinutes = Math.round(totalMs / validCompleted.length / 60000);
+      const totalMins = validCompleted.reduce((acc, r) => acc + r.durasi_menit, 0);
+      const avgMinutes = Math.round(totalMins / validCompleted.length);
       const h = Math.floor(avgMinutes / 60);
       const m = avgMinutes % 60;
       avgRepairText = h > 0 ? `${h}j ${m}m` : `${m}m`;
@@ -463,13 +460,13 @@ export default function CMMSProApp() {
     const formattedData = laporanTersaring.map((item, index) => ({
       No: index + 1,
       'Tanggal Lapor': new Date(item.created_at).toLocaleString('id-ID'),
-      'Waktu Selesai': item.resolved_at ? new Date(item.resolved_at).toLocaleString('id-ID') : 'Belum selesai',
-      'Durasi Perbaikan': formatRepairDuration(item.created_at, item.resolved_at, item.status),
       'Nama Mesin / Aset': item.asset_name,
       'Lokasi / Area': item.location,
       Prioritas: item.priority,
       'Detail Kerusakan': item.description,
       'Status Perbaikan': item.status,
+      'Teknisi Penanganan': item.nama_teknisi || '-',
+      'Lama Pengerjaan': formatManualDuration(item.durasi_menit),
       'Catatan Teknisi': item.catatan_teknisi || 'Belum ada catatan',
     }));
 
@@ -549,18 +546,27 @@ export default function CMMSProApp() {
     }
     if (statusBaru === 'Done') {
       setTechNote(item.catatan_teknisi || '');
+      setTechName(item.nama_teknisi || (user?.email ? user.email.split('@')[0] : ''));
+      const existingMins = item.durasi_menit || 0;
+      setRepairHours(existingMins > 0 ? String(Math.floor(existingMins / 60)) : '');
+      setRepairMinutes(existingMins > 0 ? String(existingMins % 60) : '');
       setResolveModal({ open: true, id: item.id, assetName: item.asset_name });
       return;
     }
-    commitStatusUpdate(item.id, statusBaru, null);
+    commitStatusUpdate(item.id, statusBaru, null, null, null);
   }
 
-  async function commitStatusUpdate(id, statusBaru, catatan) {
+  async function commitStatusUpdate(id, statusBaru, catatan, totalMenitInput, namaTeknisiInput) {
     const dataUpdate = { status: statusBaru };
+
     if (statusBaru === 'Done') {
       dataUpdate.resolved_at = new Date().toISOString();
+      dataUpdate.durasi_menit = totalMenitInput || 0;
+      dataUpdate.nama_teknisi = namaTeknisiInput?.trim() || 'Tim Teknisi';
     } else {
       dataUpdate.resolved_at = null;
+      dataUpdate.durasi_menit = null;
+      dataUpdate.nama_teknisi = null;
     }
 
     if (catatan !== null) {
@@ -575,6 +581,24 @@ export default function CMMSProApp() {
       showToast('Gagal: ' + error.message, 'error');
     }
     setResolveModal({ open: false, id: null, assetName: '' });
+  }
+
+  function handleSaveResolution() {
+    if (!techName.trim()) {
+      showToast('Nama teknisi yang menangani wajib diisi.', 'error');
+      return;
+    }
+
+    const hrs = parseInt(repairHours) || 0;
+    const mins = parseInt(repairMinutes) || 0;
+    const totalMenit = hrs * 60 + mins;
+
+    if (totalMenit <= 0) {
+      showToast('Masukkan lama pengerjaan (jam atau menit) minimal 1 menit.', 'error');
+      return;
+    }
+
+    commitStatusUpdate(resolveModal.id, 'Done', techNote, totalMenit, techName);
   }
 
   async function updatePmStatus(pmId, newStatus) {
@@ -815,10 +839,10 @@ export default function CMMSProApp() {
 
                 <div className={`p-5 rounded-2xl border relative overflow-hidden ${theme.card}`}>
                   <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500" />
-                  <p className={`text-xs font-semibold text-emerald-500 uppercase tracking-wider`}>Rata-rata Perbaikan (MTTR)</p>
+                  <p className={`text-xs font-semibold text-emerald-500 uppercase tracking-wider`}>Rata-rata Pengerjaan</p>
                   <div className="flex items-baseline justify-between mt-2">
                     <p className={`text-3xl font-extrabold ${theme.title}`}>{stats.avgRepairText}</p>
-                    <span className={`text-[11px] ${theme.muted}`}>Kecepatan</span>
+                    <span className={`text-[11px] ${theme.muted}`}>MTTR Teknisi</span>
                   </div>
                 </div>
 
@@ -1070,7 +1094,7 @@ export default function CMMSProApp() {
                           ? 'border-l-4 border-l-amber-500'
                           : 'border-l-4 border-l-slate-400';
 
-                      const durationStr = formatRepairDuration(item.created_at, item.resolved_at, item.status);
+                      const durationStr = formatManualDuration(item.durasi_menit);
 
                       return (
                         <article
@@ -1087,20 +1111,31 @@ export default function CMMSProApp() {
                                 {item.priority}
                               </span>
 
-                              {/* Badge Durasi Perbaikan */}
-                              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-lg font-semibold ${item.status === 'Done' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
-                                <Timer size={12} /> {item.status === 'Done' ? `Selesai dlm ${durationStr}` : `Berjalan: ${durationStr}`}
-                              </span>
+                              {item.status === 'Done' && durationStr !== '-' && (
+                                <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-lg font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                  <Timer size={12} /> Pengerjaan: {durationStr}
+                                </span>
+                              )}
                             </div>
 
                             <p className={`text-sm p-3 rounded-xl border leading-relaxed ${theme.subCard}`}>
                               {item.description}
                             </p>
 
-                            {item.catatan_teknisi && (
-                              <div className="text-xs text-indigo-400 bg-indigo-500/10 p-2.5 rounded-xl border border-indigo-500/20">
-                                <span className="font-bold">Catatan Teknisi: </span>
-                                {item.catatan_teknisi}
+                            {(item.catatan_teknisi || item.nama_teknisi) && (
+                              <div className="text-xs text-indigo-400 bg-indigo-500/10 p-2.5 rounded-xl border border-indigo-500/20 space-y-1">
+                                {item.nama_teknisi && (
+                                  <div>
+                                    <span className="font-bold">Teknisi: </span>
+                                    <span>{item.nama_teknisi}</span>
+                                  </div>
+                                )}
+                                {item.catatan_teknisi && (
+                                  <div>
+                                    <span className="font-bold">Catatan: </span>
+                                    <span>{item.catatan_teknisi}</span>
+                                  </div>
+                                )}
                               </div>
                             )}
 
@@ -1119,7 +1154,7 @@ export default function CMMSProApp() {
                                 Lapor: {new Date(item.created_at).toLocaleString('id-ID')}
                               </span>
                               {item.resolved_at && (
-                                <span className={`text-xs text-emerald-500 font-medium`}>
+                                <span className="text-xs text-emerald-500 font-medium">
                                   • Selesai: {new Date(item.resolved_at).toLocaleString('id-ID')}
                                 </span>
                               )}
@@ -1512,7 +1547,7 @@ export default function CMMSProApp() {
         </div>
       )}
 
-      {/* MODAL PENYELESAIAN LAPORAN */}
+      {/* MODAL PENYELESAIAN LAPORAN (NAMA TEKNISI & DURASI) */}
       {resolveModal.open && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className={`rounded-2xl max-w-md w-full p-6 shadow-2xl border space-y-4 ${theme.card}`}>
@@ -1523,13 +1558,56 @@ export default function CMMSProApp() {
               </div>
               <button onClick={() => setResolveModal({ open: false, id: null, assetName: '' })} className="text-slate-400 cursor-pointer"><X size={18} /></button>
             </div>
+
+            <div>
+              <label className="block text-xs font-semibold mb-1.5">Nama Teknisi Penanggung Jawab</label>
+              <input
+                type="text"
+                required
+                placeholder="Contoh: Budi Santoso"
+                value={techName}
+                onChange={(e) => setTechName(e.target.value)}
+                className={`w-full border rounded-xl p-2.5 text-sm outline-none ${theme.input}`}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold mb-1.5">Lama Pengerjaan Aktual</label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={repairHours}
+                    onChange={(e) => setRepairHours(e.target.value)}
+                    className={`w-full border rounded-xl p-2.5 pr-12 text-sm outline-none ${theme.input}`}
+                  />
+                  <span className={`absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-semibold ${theme.muted}`}>Jam</span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    placeholder="30"
+                    value={repairMinutes}
+                    onChange={(e) => setRepairMinutes(e.target.value)}
+                    className={`w-full border rounded-xl p-2.5 pr-14 text-sm outline-none ${theme.input}`}
+                  />
+                  <span className={`absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-semibold ${theme.muted}`}>Menit</span>
+                </div>
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold mb-1.5">Catatan Tindakan Perbaikan</label>
               <textarea rows="3" autoFocus placeholder="Penggantian komponen dan uji coba normal..." value={techNote} onChange={(e) => setTechNote(e.target.value)} className={`w-full border rounded-xl p-3 text-sm outline-none ${theme.input}`} />
             </div>
+
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setResolveModal({ open: false, id: null, assetName: '' })} className="px-4 py-2 text-xs font-semibold text-slate-400 hover:bg-slate-800 rounded-xl cursor-pointer">Batal</button>
-              <button type="button" onClick={() => commitStatusUpdate(resolveModal.id, 'Done', techNote)} className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl cursor-pointer">Simpan & Tandai Done</button>
+              <button type="button" onClick={handleSaveResolution} className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl cursor-pointer">Simpan & Tandai Done</button>
             </div>
           </div>
         </div>
