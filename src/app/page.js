@@ -28,6 +28,7 @@ import {
   BellRing,
   Activity,
   Trash2,
+  Timer,
 } from 'lucide-react';
 import {
   BarChart,
@@ -39,6 +40,23 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts';
+
+// Fungsi Pembantu Menghitung Durasi Perbaikan
+function formatRepairDuration(createdAt, resolvedAt, status) {
+  if (!createdAt) return '-';
+  const start = new Date(createdAt).getTime();
+  const end = status === 'Done' && resolvedAt ? new Date(resolvedAt).getTime() : Date.now();
+  const diffMs = Math.max(0, end - start);
+
+  const totalMinutes = Math.floor(diffMs / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) return `${days}h ${hours}j ${minutes}m`;
+  if (hours > 0) return `${hours}j ${minutes}m`;
+  return `${minutes} menit`;
+}
 
 export default function CMMSProApp() {
   const router = useRouter();
@@ -254,7 +272,40 @@ export default function CMMSProApp() {
     }
   }
 
-  // Fungsi Tambah / Kurang Stok Sparepart
+  async function handleCreatePm(e) {
+    e.preventDefault();
+    if (!pmAssetId || !pmDueDate || !pmInterval) {
+      showToast('Lengkapi data jadwal PM.', 'error');
+      return;
+    }
+    const foundAsset = assetsList.find((a) => a.id === pmAssetId);
+    if (!foundAsset) return;
+
+    const { error } = await supabase.from('preventive_maintenance').insert([
+      {
+        asset_name: foundAsset.asset_name,
+        location: foundAsset.location,
+        interval_type: pmInterval,
+        next_due_date: pmDueDate,
+        assigned_to: pmAssigned.trim() || 'Tim Teknik',
+        description: pmDesc.trim() || 'Pemeliharaan rutin',
+        status: 'Scheduled',
+      },
+    ]);
+
+    if (!error) {
+      showToast('Jadwal Preventive Maintenance dibuat!');
+      setPmAssetId('');
+      setPmDueDate('');
+      setPmAssigned('');
+      setPmDesc('');
+      setIsPmModalOpen(false);
+      fetchPmSchedules();
+    } else {
+      showToast('Gagal: ' + error.message, 'error');
+    }
+  }
+
   async function updatePartStock(partId, currentStock, delta) {
     if (userRole !== 'teknisi') {
       showToast('Hanya teknisi yang dapat memperbarui stok sparepart!', 'error');
@@ -309,9 +360,23 @@ export default function CMMSProApp() {
     const total = reports.length;
     const open = reports.filter((item) => item.status === 'Open').length;
     const progress = reports.filter((item) => item.status === 'In Progress').length;
-    const done = reports.filter((item) => item.status === 'Done').length;
+    const doneReports = reports.filter((item) => item.status === 'Done');
+    const done = doneReports.length;
     const highPriority = reports.filter((item) => item.priority === 'High' && item.status !== 'Done');
     const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    // Hitung Rata-Rata Durasi Perbaikan (MTTR)
+    let avgRepairText = '-';
+    const validCompleted = doneReports.filter((r) => r.created_at && r.resolved_at);
+    if (validCompleted.length > 0) {
+      const totalMs = validCompleted.reduce((acc, r) => {
+        return acc + Math.max(0, new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime());
+      }, 0);
+      const avgMinutes = Math.round(totalMs / validCompleted.length / 60000);
+      const h = Math.floor(avgMinutes / 60);
+      const m = avgMinutes % 60;
+      avgRepairText = h > 0 ? `${h}j ${m}m` : `${m}m`;
+    }
 
     const pmTotal = pmSchedules.length;
     const pmDone = pmSchedules.filter((i) => i.status === 'Completed').length;
@@ -323,6 +388,7 @@ export default function CMMSProApp() {
       progress,
       done,
       rate,
+      avgRepairText,
       highPriority,
       pmTotal,
       pmDone,
@@ -397,6 +463,8 @@ export default function CMMSProApp() {
     const formattedData = laporanTersaring.map((item, index) => ({
       No: index + 1,
       'Tanggal Lapor': new Date(item.created_at).toLocaleString('id-ID'),
+      'Waktu Selesai': item.resolved_at ? new Date(item.resolved_at).toLocaleString('id-ID') : 'Belum selesai',
+      'Durasi Perbaikan': formatRepairDuration(item.created_at, item.resolved_at, item.status),
       'Nama Mesin / Aset': item.asset_name,
       'Lokasi / Area': item.location,
       Prioritas: item.priority,
@@ -489,9 +557,16 @@ export default function CMMSProApp() {
 
   async function commitStatusUpdate(id, statusBaru, catatan) {
     const dataUpdate = { status: statusBaru };
+    if (statusBaru === 'Done') {
+      dataUpdate.resolved_at = new Date().toISOString();
+    } else {
+      dataUpdate.resolved_at = null;
+    }
+
     if (catatan !== null) {
       dataUpdate.catatan_teknisi = catatan.trim() || 'Selesai diperbaiki';
     }
+
     const { error } = await supabase.from('maintenance_reports').update(dataUpdate).eq('id', id);
     if (!error) {
       await fetchReports();
@@ -571,7 +646,7 @@ export default function CMMSProApp() {
         <div>
           <div className={`p-6 border-b flex items-center justify-between ${theme.divider}`}>
             <div className="flex items-center gap-3">
-              <div className="bg-gradient-to-br from-indigo-600 to-blue-600 p-2.5 rounded-xl text-white shadow-md">
+              <div className="bg-linear-to-br from-indigo-600 to-blue-600 p-2.5 rounded-xl text-white shadow-md">
                 <Activity size={20} />
               </div>
               <div>
@@ -739,11 +814,11 @@ export default function CMMSProApp() {
                 </div>
 
                 <div className={`p-5 rounded-2xl border relative overflow-hidden ${theme.card}`}>
-                  <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500" />
-                  <p className="text-xs font-semibold text-rose-500 uppercase tracking-wider">Menunggu (Open)</p>
+                  <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500" />
+                  <p className={`text-xs font-semibold text-emerald-500 uppercase tracking-wider`}>Rata-rata Perbaikan (MTTR)</p>
                   <div className="flex items-baseline justify-between mt-2">
-                    <p className={`text-3xl font-extrabold ${theme.title}`}>{stats.open}</p>
-                    <span className={`text-[11px] ${theme.muted}`}>Butuh Teknisi</span>
+                    <p className={`text-3xl font-extrabold ${theme.title}`}>{stats.avgRepairText}</p>
+                    <span className={`text-[11px] ${theme.muted}`}>Kecepatan</span>
                   </div>
                 </div>
 
@@ -995,6 +1070,8 @@ export default function CMMSProApp() {
                           ? 'border-l-4 border-l-amber-500'
                           : 'border-l-4 border-l-slate-400';
 
+                      const durationStr = formatRepairDuration(item.created_at, item.resolved_at, item.status);
+
                       return (
                         <article
                           key={item.id}
@@ -1009,6 +1086,11 @@ export default function CMMSProApp() {
                               <span className={`text-[11px] px-2.5 py-0.5 rounded-lg font-bold ${item.priority === 'High' ? 'bg-rose-500/15 text-rose-500' : item.priority === 'Medium' ? 'bg-amber-500/15 text-amber-500' : 'bg-slate-500/15 text-slate-400'}`}>
                                 {item.priority}
                               </span>
+
+                              {/* Badge Durasi Perbaikan */}
+                              <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-lg font-semibold ${item.status === 'Done' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
+                                <Timer size={12} /> {item.status === 'Done' ? `Selesai dlm ${durationStr}` : `Berjalan: ${durationStr}`}
+                              </span>
                             </div>
 
                             <p className={`text-sm p-3 rounded-xl border leading-relaxed ${theme.subCard}`}>
@@ -1022,7 +1104,7 @@ export default function CMMSProApp() {
                               </div>
                             )}
 
-                            <div className="flex items-center gap-4 pt-1">
+                            <div className="flex flex-wrap items-center gap-4 pt-1">
                               {item.photo_url && (
                                 <button
                                   type="button"
@@ -1034,12 +1116,17 @@ export default function CMMSProApp() {
                                 </button>
                               )}
                               <span className={`text-xs ${theme.muted}`}>
-                                Dilaporkan: {new Date(item.created_at).toLocaleString('id-ID')}
+                                Lapor: {new Date(item.created_at).toLocaleString('id-ID')}
                               </span>
+                              {item.resolved_at && (
+                                <span className={`text-xs text-emerald-500 font-medium`}>
+                                  • Selesai: {new Date(item.resolved_at).toLocaleString('id-ID')}
+                                </span>
+                              )}
                             </div>
                           </div>
 
-                          <div className={`flex sm:flex-col justify-between items-center sm:items-end border-t sm:border-t-0 pt-3 sm:pt-0 min-w-[140px] ${theme.divider}`}>
+                          <div className={`flex sm:flex-col justify-between items-center sm:items-end border-t sm:border-t-0 pt-3 sm:pt-0 min-w-35 ${theme.divider}`}>
                             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${item.status === 'Done' ? 'bg-emerald-500/15 text-emerald-500' : item.status === 'In Progress' ? 'bg-amber-500/15 text-amber-500' : 'bg-rose-500/15 text-rose-500'}`}>
                               {item.status}
                             </span>
@@ -1138,7 +1225,6 @@ export default function CMMSProApp() {
               </div>
             </div>
           ) : activeMenu === 'spareparts' ? (
-            /* ================= VIEW 4: INVENTARIS SPAREPARTS DENGAN TOMBOL UPDATE STOK ================= */
             <div className="space-y-6">
               <div className={`p-5 rounded-2xl border flex flex-col sm:flex-row justify-between items-center gap-4 ${theme.card}`}>
                 <div className="relative flex-1 w-full sm:w-auto">
